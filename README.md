@@ -11,8 +11,8 @@ FinalTests, Logs and test folder contains the events that are used in tensorflow
 
 
 
----------------------------------------------------------------IMPORTANT---------------------------------------------------------------------------------
----------------------------------------------------------------------------------------------------------------------------------------------------------
+------------IMPORTANT-------------
+----------------------------------
 
 MAKE SURE TO CHANGE THE FMU PATH TO THE RIGHT FMU PATH AT LINES 39 AND 40 IN RL.PY
 THIS MEAN USE accFMUPath = ".\ACCTestBenchExampleNoNoise.fmu" IF YOU TO USE THE NOISELESS ENVIRONMENT
