@@ -2,6 +2,7 @@ import shutil
 from typing import Any
 
 import gym
+import math
 import numpy as np
 import optuna as optuna
 import scipy
@@ -36,11 +37,12 @@ def load(fmuPath, model_description, instanceName):
     return fmu, unzipdir
 
 #accFMUPath = ".\Acc01StepSizeB.fmu"
-#accFMUPath = ".\ACCTestBenchExampleNoNoise.fmu"
-accFMUPath = ".\ACCTestBenchExampleWithNoise.fmu"
-episodeFactor = 100
+#accFMUPath = ".\ACCTestBenchExampleForFMu.fmu"
+#accFMUPath = ".\ACCTestBenchExampleWithNoise.fmu"
+accFMUPath = ".\ACCTestBenchExample.fmu"
+episodeFactor = 30
 START_TIME = 0.0
-STOP_TIME = 34.0 # 80
+STOP_TIME = 40 # 80
 STEP_SIZE = 0.1
 TIMESTEPS = episodeFactor*int((STOP_TIME-START_TIME)/STEP_SIZE)
 
@@ -117,10 +119,10 @@ class FMIEnv(): # this is with normalization
         safe_distance = self.accFMU.getReal([self.VarsACC["safe_distance"].valueReference])[0]
         get_longi_velocity = self.accFMU.getReal([self.VarsACC["longitudinal_velocity"].valueReference])[0]
 
-        if self.time <= 1.0:
-            get_velocity = -2.2
-        else:
-            get_velocity = self.accFMU.getReal([self.VarsACC["relative_velocity"].valueReference])[0]
+       # if self.time <= 1.0:
+       #     get_velocity = -2.2
+       # else:
+        get_velocity = self.accFMU.getReal([self.VarsACC["relative_velocity"].valueReference])[0]
 
 
         # perform one step
@@ -154,52 +156,36 @@ class FMIEnv(): # this is with normalization
         ---------------------------------------------------------------------
         """
 
+
         if reward_selection == 1:
 
-            #if len(self.acceleration_trajectory) > 1:
-               # gaus_noise = np.random.normal(1, 0.1, set_acelaration.shape)
-               # set_acelaration = set_acelaration + gaus_noise
-            safte_coef = (get_rel_dis- safe_distance)*0.01
-
-
-            if 100<=(get_rel_dis) and (get_rel_dis)  <=200:
-                 sim_reward =  (set_acelaration)*0.013 + ((safte_coef)*0.0034)-jitter
-            elif 70<=(get_rel_dis) and (get_rel_dis)  <100:
-                sim_reward = (set_acelaration)*0.010 + ((safte_coef)*0.0044)-jitter
-            elif 40 <= (get_rel_dis) and (get_rel_dis) < 70:
-                sim_reward =  -(set_acelaration)*0.045 + ((safte_coef)*0.0054)-jitter
-            elif 10 <= (get_rel_dis) and (get_rel_dis) < 40:
-                sim_reward =  -(set_acelaration)*0.09 + ((safte_coef)*0.0064)-jitter
-            elif 1 <= (get_rel_dis) and (get_rel_dis) < 10:
-                sim_reward = -(set_acelaration) * 0.14 + ((safte_coef) * 0.54) - jitter
-            elif 0 <= (get_rel_dis) and (get_rel_dis) < 1:
-                sim_reward = -(set_acelaration) * 0.2 + ((safte_coef) * 0.64) - jitter
-            elif (get_rel_dis - safe_distance) <= 0:
-                sim_reward = -3
-            else:
-                sim_reward = 0
+            distance_difference = get_rel_dis - safe_distance
+            distance_reward = 10/ (distance_difference +1)
+            sim_reward = distance_reward
 
 
 
         elif reward_selection == 2:
-            if(get_rel_dis<safe_distance):
-                lead_car_velocity =get_longi_velocity- get_velocity
-                vRef = min(lead_car_velocity, get_longi_velocity)
+            slope = 4
+            intercept = 0.0
+            distance_difference = get_rel_dis - safe_distance
+            velocity_difference = get_longi_velocity - get_velocity
+
+            distance_reward = np.arctan(distance_difference)
+            velocity_reward = 1.0/(slope*abs(velocity_difference) +intercept)
+            velocity_reward2 = (1/np.cosh(velocity_difference)) *2
+
+
+
+
+            if get_rel_dis < 80 and get_rel_dis > safe_distance:
+                extra = 50/(get_rel_dis+1)
             else:
-                vRef = get_longi_velocity
+                extra = 0
 
-            velocity_error = vRef - get_longi_velocity
 
-            if velocity_error**2 <= 5:
-                Mt = 1
-            else:
-                Mt = 0
+            sim_reward = distance_reward + extra + velocity_reward2
 
-            if len(self.acceleration_trajectory)> 1:
-                 sim_reward =-(0.1*velocity_error**2+self.acceleration_trajectory[self.teller-1]**2)+Mt  -3*jitter +(get_rel_dis- safe_distance)*0.1
-
-            else:
-                sim_reward = 0
 
 
 
@@ -223,11 +209,11 @@ class FMIEnv(): # this is with normalization
 
         # Normalize The Observation Signals
         # [x_min x_max] -> [a b] : x_normalized = a + ((x–x_min)*(b-a))/(x_max–x_min)
-       # acceleration_norm = -1 + ((acceleration + 3) * 2) / 5  # [-3 2] -> [-1 1]
+        #acceleration_norm = -1 + ((set_acelaration + 3) * 2) / 5  # [-3 2] -> [-1 1]
         get_rel_dis_norm =  -1 +((get_rel_dis-0)*(2))/(200-0)        #  [0 200] -> [-1 1]
-        get_rel_vel_norm =  -1 +((get_velocity+5)*(2))/(2.2+5)                      # [-5 2.2] --> [-1 1]
-        get_safe_dist_norm = -1 + ((safe_distance -15) * (2)) / (50-15)           # [15 50] --> [-1 1]
-        get_longi_velocity_norm  = -1 +((get_longi_velocity-0)*(2))/(22-0)    # [0 22] --> [-1 1]
+        get_rel_vel_norm =  -1 +((get_velocity +20 )*(2))/(25+20)                      # [-5 2.2] --> [-1 1]
+        get_safe_dist_norm = -1 + ((safe_distance -10) * (2)) / (50-10)           # [15 50] --> [-1 1]
+        get_longi_velocity_norm  = -1 +((get_longi_velocity-2)*(2))/(22-2)    # [0 22] --> [-1 1]
 
 
 
@@ -282,7 +268,7 @@ class FMIEnv(): # this is with normalization
     def render(self, mode="console"):
         # Plot results
         # pass
-     if(self.time>34.0):
+     if(self.time>STOP_TIME-0.1):
         plt.subplot(4, 1, 1)
         plt.xlabel("time")
         plt.plot(self.time_trajectory, self.acceleration_trajectory, '-', label="Acceleration")

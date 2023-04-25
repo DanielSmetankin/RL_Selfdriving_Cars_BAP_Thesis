@@ -1,9 +1,11 @@
 from typing import Any, Dict
-
+import torch as th
 import gym
 import numpy as np
 import optuna
 import torch
+import onnx
+import onnxruntime as ort
 
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
@@ -23,12 +25,12 @@ from torch import nn
 import RL
 from RL import FMIEnv
 
-N_TRIALS = 20
-N_STARTUP_TRIALS = 5
-N_EVALUATIONS = 2
+N_TRIALS = 10
+N_STARTUP_TRIALS =3
+N_EVALUATIONS = 10
 N_TIMESTEPS = 10000
 EVAL_FREQ = int(N_TIMESTEPS / N_EVALUATIONS)
-N_EVAL_EPISODES = 3
+N_EVAL_EPISODES = 10
 TIMESTEPS = 10000
 DEFAULT_HYPERPARAMS = {
     "policy": "MlpPolicy",
@@ -301,19 +303,37 @@ def HPExtractor(algo):
 
     return best_parm
 
+
+class OnnxablePolicy(th.nn.Module):
+    def __init__(self, extractor, action_net, value_net):
+        super().__init__()
+        self.extractor = extractor
+        self.action_net = action_net
+        self.value_net = value_net
+
+    def forward(self, observation):
+        # NOTE: You may have to process (normalize) observation in the correct
+        #       way before using this. See `common.preprocessing.preprocess_obs`
+        action_hidden, value_hidden = self.extractor(observation)
+        return self.action_net(action_hidden), self.value_net(value_hidden)
+
 def main():
     # Logging bash command bellow
     # tensorboard --logdir ./a2c_cartpole_tensorboard/
     # tensorboard dev upload --logdir \'./a2c_cartpole_tensorboard/'
     env = FMIEnv()
     TIMESTEPS = N_TIMESTEPS  # env1 = make_vec_env("CartPole-v1", n_envs=4)
-    useHyperParameters = 0
-    makeNewModel = 0
-    agentUsed = "td3"
+    useHyperParameters = True
+
+
+
+
+    makeNewModel = False
+    agentUsed = "PPO"
 
     #Extract all hyperparameters so we can input it into our model
-    if(useHyperParameters == 1 ):
-        if(agentUsed=="ppo"):
+    if(useHyperParameters == True ):
+        if(agentUsed=="PPO"):
             best_params = HPExtractor("PPO")
             gamma1 = best_params["gamma"]
             vf_coef1 = best_params["vf_coef"]
@@ -327,7 +347,7 @@ def main():
             with open('bestparam.txt', 'w') as f:
              f.write(str(best_params))
 
-        elif(agentUsed=="ddpg"):
+        elif(agentUsed=="DDPG"):
             best_params = HPExtractor("DDPG")
             gamma1 = best_params["gamma"]
             tau1 =best_params["tau"]
@@ -337,7 +357,7 @@ def main():
             with open('bestparam.txt', 'w') as f:
                 f.write(str(best_params))
 
-        elif (agentUsed == "td3"):
+        elif (agentUsed == "TD3"):
             best_params = HPExtractor("TD3")
             gamma1 = best_params["gamma"]
             tau1 = best_params["tau"]
@@ -348,7 +368,7 @@ def main():
             with open('bestparam.txt', 'w') as f:
                 f.write(str(best_params))
 
-        elif(agentUsed=="sac"):
+        elif(agentUsed=="SAC"):
             best_params = HPExtractor("SAC")
 
             gamma1 = best_params["gamma"]
@@ -356,31 +376,46 @@ def main():
             batch_size1 = best_params["batch_size"]
             buffer_size1 = best_params["buffer_size"]
             tau1 = best_params["tau"]
-            ent_coef1 = best_params["ent_coef"]
-            target_entropy1 = best_params["target_entropy"]
+         #   ent_coef1 = best_params["ent_coef"]
+         #   target_entropy1 = best_params["target_entropy"]
+            with open('bestparam.txt', 'w') as f:
+                f.write(str(best_params))
 
 
 
-
-    if(makeNewModel==1):
-        if(useHyperParameters == 1):
-            if(agentUsed == "ppo"):
+    if(makeNewModel==True):
+        if(useHyperParameters == True):
+            if(agentUsed == "PPO"):
                 model = PPO("MlpPolicy", env, gamma = gamma1, n_steps=n_steps1, learning_rate = learning_rate1, ent_coef=ent_coef1,  vf_coef = vf_coef1, clip_range= clip_range1, n_epochs=n_epochs1, batch_size=batch_size1, gae_lambda= gae_lambda1, verbose=1, tensorboard_log="./finalTests/")
-            elif(agentUsed == "ddpg"):
+            elif(agentUsed == "DDPG"):
                 model = DDPG("MlpPolicy", env, gamma= gamma1 , tau = tau1, learning_rate=learning_rate1, batch_size=batch_size1, buffer_size=buffer_size1 ,  verbose=1, tensorboard_log="./finalTests/")
-            elif (agentUsed == "td3"):
+            elif (agentUsed == "TD3"):
                 model = TD3("MlpPolicy", env, gamma=gamma1, tau=tau1, learning_rate=learning_rate1,batch_size=batch_size1, buffer_size=buffer_size1, verbose=1, target_policy_noise = target_policy_noise1 , tensorboard_log="./finalTests/")
-            elif (agentUsed == "sac"):
+            elif (agentUsed == "SAC"):
                 model = SAC("MlpPolicy", env, gamma=gamma1, tau=tau1, learning_rate=learning_rate1, batch_size=batch_size1, buffer_size=buffer_size1, verbose=1, device= "auto" ,tensorboard_log="./finalTests/")
         else:
             # Always change manually to TD3 PPO SAC A2C
-            model = TD3("MlpPolicy", env, verbose=1, tensorboard_log="./finalTests/")
+            model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./finalTests/")
         model.learn(total_timesteps=TIMESTEPS, tb_log_name="TD3_R1_HP")
-        model.save("ACCBenchmark_Accelaration")
+        model.save(agentUsed)
         del model  # remove to demonstrate saving and loading
 
     #Always change manually to TD3 PPO SAC A2C
-    model = TD3.load("TD3_R2")
+    model = PPO.load("PPO.zip")
+    ## added code for onnx------------------------------------------------------------------------
+   # onnxable_model = OnnxablePolicy(
+   #     model.policy.mlp_extractor, model.policy.action_net, model.policy.value_net
+   # )
+   # observation_size = model.observation_space.shape
+   # dummy_input = th.randn(1, *observation_size)
+    #th.onnx.export(
+     #   onnxable_model,
+     #   dummy_input,
+     #   "my_ppo_model.onnx",
+     #   opset_version=9,
+    #    input_names=["input"],
+   # )
+    ##------------------------------------------------------------------------------------------
     obs = env.reset()
 
     # study.best_params
@@ -389,14 +424,15 @@ def main():
         obs, rewards, done, info = env.step(action)
         env.render()
         acceleration_array = np.array([range(0, len(env.acceleration_trajectory))]).T
-        acceleration_array = acceleration_array / 1000
+        acceleration_array = acceleration_array/10
         acceleration_array = np.append(acceleration_array, np.array([env.acceleration_trajectory]).T, axis=1)
-        savemat("ACCBenchmark_matfiles/ACC.mat", {"matrix": acceleration_array})
+        savemat("ACCBenchmark_matfiles/ACC_master.mat", {"matrix": acceleration_array})
 
     env.close()
+   # onnx.test(observation_size)
 
 
-#     export to .mat file for simulink
+
 
 
 if __name__ == "__main__":

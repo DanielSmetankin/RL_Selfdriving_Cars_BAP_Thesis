@@ -1,1 +1,0 @@
-{'batch_size': 256, 'buffer_size': 10000, 'gamma': 0.9, 'learning_rate': 0.06304235489412766, 'target_policy_noise': 0.1, 'tau': 0.01}
